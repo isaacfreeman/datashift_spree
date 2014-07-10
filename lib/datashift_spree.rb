@@ -32,7 +32,7 @@
 #     DataShift::SpreeHelper::load_commands
 #
 require 'rbconfig'
-# require 'datashift'
+require 'datashift'
 
 $:.unshift '.' unless $:.include?('.')
 
