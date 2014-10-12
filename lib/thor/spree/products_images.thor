@@ -16,8 +16,8 @@ require 'datashift_spree'
 
 require 'spree_helper'
 
-module DatashiftSpree 
-  
+module DatashiftSpree
+
   class Load < Thor
 
     include DataShift::Logging
@@ -30,6 +30,7 @@ module DatashiftSpree
     method_option :verbose, :aliases => '-v', :type => :boolean, :desc => "Verbose logging"
     method_option :config, :aliases => '-c',  :type => :string, :desc => "Configuration file containg defaults or over rides in YAML"
     method_option :dummy, :aliases => '-d', :type => :boolean, :desc => "Dummy run, do not actually save Image or Product"
+    method_option :match_by, :aliases => '-m', :type => :string, :desc => "Find products that match header"
 
     def products()
 
