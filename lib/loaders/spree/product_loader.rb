@@ -15,7 +15,7 @@ module DataShift
     class ProductLoader < SpreeBaseLoader
 
       # Options
-      #  
+      #
       #  :reload           : Force load of the method dictionary for object_class even if already loaded
       #  :verbose          : Verbose logging and to STDOUT
       #
@@ -35,30 +35,150 @@ module DataShift
       #   [:dummy]           : Perform a dummy run - attempt to load everything but then roll back
       #
       def perform_load( file_name, opts = {} )
-        
+
         logger.info "Product load from File [#{file_name}]"
-            
+
         options = opts.dup
 
         #puts "Product Loader -  Load Options", options.inspect
 
         # In >= 1.1.0 Image moved to master Variant from Product so no association called Images on Product anymore
-        
+
         # Non Product/database fields we can still  process
         @we_can_process_these_anyway =  ['images',  "variant_price", "variant_sku"]
-          
+
         # In >= 1.3.0 price moved to master Variant from Product so no association called Price on Product anymore
         # taking care of it here, means users can still simply just include a price column
         @we_can_process_these_anyway << 'price' if(DataShift::SpreeHelper::version.to_f >= 1.3 )
-      
+
         if(DataShift::SpreeHelper::version.to_f > 1 )
           options[:force_inclusion] = options[:force_inclusion] ? ([ *options[:force_inclusion]] + @we_can_process_these_anyway) : @we_can_process_these_anyway
         end
 
         logger.info "Product load using forced operators: [#{options[:force_inclusion]}]" if(options[:force_inclusion])
-        
+
         super(file_name, options)
       end
+
+      # Load data through active Record models into DB from a CSV file
+      #
+      # Assumes header_row is first row i.e row 0
+      #
+      #
+      # OPTIONS :
+      #
+      #  [:dummy]           : Perform a dummy run - attempt to load everything but then roll back
+      #
+      #  Options passed through  to :  populate_method_mapper_from_headers
+      #
+      #   [:mandatory]       : Array of mandatory column names
+      #   [:force_inclusion] : Array of inbound column names to force into mapping
+      #   [:include_all]     : Include all headers in processing - takes precedence of :force_inclusion
+      #   [:strict]          : Raise exception when no mapping found for a column heading (non mandatory)
+
+      def perform_csv_load(file_name, options = {})
+
+        require "csv"
+
+        # TODO - can we abstract out what a 'parsed file' is - so a common object can represent excel,csv etc
+        # then  we can make load() more generic
+
+        @parsed_file = CSV.read(file_name)
+
+        # Create a method_mapper which maps list of headers into suitable calls on the Active Record class
+        # For example if model has an attribute 'price' will map columns called Price, price, PRICE etc to this attribute
+        populate_method_mapper_from_headers( @parsed_file.shift, options)
+
+        puts "\n\n\nLoading from CSV file: #{file_name}"
+        puts "Processing #{@parsed_file.size} rows"
+        begin
+
+          load_object_class.transaction do
+            @reporter.reset
+
+            @parsed_file.each_with_index do |row, i|
+              @current_row = row
+
+              name_index = @headers.find_index("Name")
+              name = row[name_index]
+
+              if options["match_by"]
+                name_index = @headers.find_index(options["match_by"])
+                name = row[name_index]
+                condition_hash = {name: row[name_index]}
+                object = find_or_new(@load_object_class, condition_hash)
+                reset(object)
+              end
+
+              puts ""
+              action = @load_object.persisted? ? 'Updating' : 'Creating'
+              puts "#{action} row #{i+2}: #{name}"
+
+              @reporter.processed_object_count += 1
+
+              begin
+                # First assign any default values for columns not included in parsed_file
+                process_missing_columns_with_defaults
+
+                # TODO - Smart sorting of column processing order ....
+                # Does not currently ensure mandatory columns (for valid?) processed first but model needs saving
+                # before associations can be processed so user should ensure mandatory columns are prior to associations
+
+                # as part of this we also attempt to save early, for example before assigning to
+                # has_and_belongs_to associations which require the load_object has an id for the join table
+
+                # Iterate over the columns method_mapper found in Excel,
+                # pulling data out of associated column
+                @method_mapper.method_details.each_with_index do |method_detail, col|
+                  value = row[col]
+                  prepare_data(method_detail, value)
+                  process()
+                end
+
+              rescue => e
+                failure( row, true )
+                logger.error "Failed to process row [#{i}] (#{@current_row})"
+
+                if verbose
+                  puts "Failed to process row [#{i}] (#{@current_row})"
+                  puts e.inspect
+                end
+
+                # don't forget to reset the load object
+                new_load_object
+                next
+              end
+
+              # TODO - make optional -  all or nothing or carry on and dump out the exception list at end
+              unless save
+                failure
+                logger.error "Failed to save row [#{@current_row}] (#{load_object.inspect})"
+                logger.error load_object.errors.inspect if(load_object)
+              else
+                logger.info "Row #{@current_row} succesfully SAVED : ID #{load_object.id}"
+                @reporter.add_loaded_object(@load_object)
+              end
+
+              # don't forget to reset the object or we'll update rather than create
+              new_load_object
+
+            end
+
+            raise ActiveRecord::Rollback if(options[:dummy]) # Don't actually create/upload to DB if we are doing dummy run
+          end
+        rescue => e
+          puts "CAUGHT ", e.backtrace, e.inspect
+          if e.is_a?(ActiveRecord::Rollback) && options[:dummy]
+            puts "CSV loading stage complete - Dummy run so Rolling Back."
+          else
+            raise e
+          end
+        ensure
+          report
+        end
+
+      end
+
 
       # Over ride base class process with some Spree::Product specifics
       #
@@ -70,9 +190,9 @@ module DataShift
 
         current_method_detail = @populator.current_method_detail
         current_value         = @populator.current_value
-        
+
         logger.debug "Processing value: [#{current_value}]"
-        
+
         # Special cases for Products, generally where a simple one stage lookup won't suffice
         # otherwise simply use default processing from base class
         if(current_value && (current_method_detail.operator?('variants') || current_method_detail.operator?('option_types')) )
@@ -97,6 +217,8 @@ module DataShift
 
             if(current_value.to_s.include?(Delimiters::multi_assoc_delim))
 
+              current_value.to_s.include?(Delimiters::multi_assoc_delim)
+
               # Check if we processed Option Types and assign  per option
               values = current_value.to_s.split(Delimiters::multi_assoc_delim)
 
@@ -104,14 +226,14 @@ module DataShift
                 @load_object.variants.each_with_index {|v, i| v.price = values[i].to_f }
                 @load_object.save
               else
-                puts "WARNING: Price entries did not match number of Variants - None Set"
+                puts "WARNING: #{values.size} price entries #{current_value} did not match #{@load_object.variants.size} variants - None Set"
               end
             end
 
           else
             super
           end
-          
+
         elsif(current_method_detail.operator?('variant_sku') && current_value)
 
           if(@load_object.variants.size > 0)
@@ -125,14 +247,14 @@ module DataShift
                 @load_object.variants.each_with_index {|v, i| v.sku = values[i].to_s }
                 @load_object.save
               else
-                puts "WARNING: SKU entries did not match number of Variants - None Set"
+                puts "WARNING: #{values.size} SKU entries #{current_value} did not match #{@load_object.variants.size} variants - None Set"
               end
             end
 
           else
             super
           end
-          
+
         elsif(current_value && (current_method_detail.operator?('count_on_hand') || current_method_detail.operator?('on_hand')) )
 
 
@@ -161,7 +283,7 @@ module DataShift
                 @load_object.variants.each_with_index {|v, i| v.on_hand = values[i].to_i }
                 @load_object.save
               else
-                puts "WARNING: Count on hand entries did not match number of Variants - None Set"
+                puts "WARNING: #{values.size} count on hand entries #{current_value} did not match #{@load_object.variants.size} variants - None Set"
               end
             end
 
@@ -181,6 +303,11 @@ module DataShift
         end
       end
 
+      def find_or_new( klass, condition_hash = {} )
+        @records = klass.find(:all, :conditions => condition_hash)
+        return @records.any? ? @records.first : klass.new
+      end
+
       private
 
       # Special case for OptionTypes as it's two stage process
@@ -195,26 +322,26 @@ module DataShift
       #  '|' seperates Variants
       #
       #   ';' list of option values
-      #  Examples : 
-      #  
+      #  Examples :
+      #
       #     mime_type:jpeg;print_type:black_white|mime_type:jpeg|mime_type:png, PDF;print_type:colour
       #
       def add_options
-      
+
         # TODO smart column ordering to ensure always valid by time we get to associations
         begin
           save_if_new
         rescue => e
-          
+
           raise DataShifSpree::ProductLoadError.new("Cannot add OptionTypes/Variants - No parent Product")
         end
         # example : mime_type:jpeg;print_type:black_white|mime_type:jpeg|mime_type:png, PDF;print_type:colour
 
         variants = get_each_assoc
 
-        # example line becomes :  
-        #   1) mime_type:jpeg;print_type:black_white  
-        #   2) mime_type:jpeg  
+        # example line becomes :
+        #   1) mime_type:jpeg;print_type:black_white
+        #   2) mime_type:jpeg
         #   3) mime_type:png, PDF;print_type:colour
 
         variants.each do |per_variant|
@@ -239,7 +366,7 @@ module DataShift
               end
               puts "Created missing OptionType #{option_type.inspect}"
             end
-                      
+
             # OptionTypes must be specified first on Product to enable Variants to be created
             # TODO - is include? very inefficient ??
             @load_object.option_types << option_type unless @load_object.option_types.include?(option_type)
@@ -258,11 +385,11 @@ module DataShift
           # Now create set of Variants, some of which maybe composites
           # Find the longest set of OVs to use as base for combining with the rest
           sorted_map = optiontype_vlist_map.sort_by { |k,v| v.size }.reverse
-       
+
           # [ [mime, ['pdf', 'jpeg', 'gif']], [print_type, ['black_white']] ]
-          
+
           lead_option_type, lead_ovalues = sorted_map.shift
-          
+
           # TODO .. benchmarking to find most efficient way to create these but ensure Product.variants list
           # populated .. currently need to call reload to ensure this (seems reqd for Spree 1/Rails 3, wasn't required b4
           lead_ovalues.each do |ovname|
@@ -270,17 +397,17 @@ module DataShift
             ov_list = []
 
             ovname.strip!
-            
+
             ov = @@option_value_klass.find_or_create_by_name_and_option_type_id(ovname, lead_option_type.id, :presentation => ovname.humanize)
 
             ov_list << ov if ov
- 
+
             # Process rest of array of types => values
-            sorted_map.each do |ot, ovlist| 
+            sorted_map.each do |ot, ovlist|
               ovlist.each do |for_composite|
-                
+
                 for_composite.strip!
-                
+
                 ov = @@option_value_klass.find_or_create_by_name_and_option_type_id(for_composite, ot.id, :presentation => for_composite.humanize)
 
                 ov_list << ov if(ov)
@@ -288,9 +415,9 @@ module DataShift
             end
 
             unless(ov_list.empty?)
-              
+
               logger.info("Creating Variant from OptionValue(s) #{ov_list.collect(&:name).inspect}")
-              
+
               i = @load_object.variants.size + 1
 
               # This one line seems to works for 1.1.0 - 3.2 but not 1.0.0 - 3.1 ??
@@ -300,7 +427,7 @@ module DataShift
 							  variant = @@variant_klass.create( :product => @load_object, :sku => "#{@load_object.sku}_#{i}", :price => @load_object.price)
 							end
 
-              variant.option_values << ov_list if(variant)    
+              variant.option_values << ov_list if(variant)
             end
           end
 
