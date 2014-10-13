@@ -97,7 +97,6 @@ module DataShift
             @reporter.reset
 
             @parsed_file.each_with_index do |row, i|
-
               @current_row = row
 
               name_index = @headers.find_index("Name")
@@ -112,11 +111,8 @@ module DataShift
               end
 
               puts ""
-              if @load_object.persisted?
-                puts "Updating row #{i+2}: #{name}"
-              else
-                puts "Creating row #{i+2}: #{name}"
-              end
+              action = @load_object.persisted? ? 'Updating' : 'Creating'
+              puts "#{action} row #{i+2}: #{name}"
 
               @reporter.processed_object_count += 1
 
@@ -134,11 +130,8 @@ module DataShift
                 # Iterate over the columns method_mapper found in Excel,
                 # pulling data out of associated column
                 @method_mapper.method_details.each_with_index do |method_detail, col|
-
                   value = row[col]
-
                   prepare_data(method_detail, value)
-
                   process()
                 end
 
@@ -146,7 +139,7 @@ module DataShift
                 failure( row, true )
                 logger.error "Failed to process row [#{i}] (#{@current_row})"
 
-                if(verbose)
+                if verbose
                   puts "Failed to process row [#{i}] (#{@current_row})"
                   puts e.inspect
                 end
@@ -157,7 +150,7 @@ module DataShift
               end
 
               # TODO - make optional -  all or nothing or carry on and dump out the exception list at end
-              unless(save)
+              unless save
                 failure
                 logger.error "Failed to save row [#{@current_row}] (#{load_object.inspect})"
                 logger.error load_object.errors.inspect if(load_object)
@@ -312,11 +305,7 @@ module DataShift
 
       def find_or_new( klass, condition_hash = {} )
         @records = klass.find(:all, :conditions => condition_hash)
-        if @records.any?
-          return @records.first
-        else
-          return klass.new
-        end
+        return @records.any? ? @records.first : klass.new
       end
 
       private
