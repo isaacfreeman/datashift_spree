@@ -5,7 +5,7 @@ $:.unshift lib unless $:.include?(lib)
 
 require 'rake'
 require 'date'
-require '#{lib}/datashift_spree'
+require "#{lib}/datashift_spree"
 
 Gem::Specification.new do |s|
   s.platform = Gem::Platform::RUBY
