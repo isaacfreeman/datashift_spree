@@ -1,20 +1,12 @@
-lib = File.expand_path('../lib/', __FILE__)
-
-$:.unshift '.'
-$:.unshift lib unless $:.include?(lib)
-
 require 'rake'
-require 'date'
-require "#{lib}/datashift_spree"
 
 Gem::Specification.new do |s|
   s.platform = Gem::Platform::RUBY
-  s.name = DataShift::SpreeHelper::gem_name
-  s.version = DataShift::SpreeHelper::gem_version
+  s.name = 'datashift_spree'#Helper::gem_name
+  s.version = '0.6.0'
 
   s.required_rubygems_version = Gem::Requirement.new(">= 0") if s.respond_to? :required_rubygems_version=
   s.authors = ["Thomas Statter"]
-  s.date = Date.today.to_s
   s.description = "Comprehensive Excel/CSV import/export for Spree, Products,Images, any model with full associations"
   s.email = "rubygems@autotelik.co.uk"
 
@@ -32,9 +24,9 @@ Gem::Specification.new do |s|
   s.require_paths = ["lib"]
   s.rubygems_version = "1.8.15"
   s.summary = "Product and image import/export for Spree from Excel/CSV"
-
-  s.add_dependency(%q<datashift>, [">= 0.12.0"])
-  s.add_dependency(%q<mechanize>, [">= 0"])
+  
+  s.add_runtime_dependency 'datashift', '~> 0.16', '>= 0.16.0'
+  s.add_runtime_dependency 'mechanize', '~> 2.6', '>= 2.6.0'
 
   # should work with any version of spree so perhaps leave it to the client app to define
 end

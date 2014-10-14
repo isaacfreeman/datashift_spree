@@ -131,8 +131,8 @@ module DataShift
                 # pulling data out of associated column
                 @method_mapper.method_details.each_with_index do |method_detail, col|
                   value = row[col]
-                  prepare_data(method_detail, value)
-                  process()
+                  # prepare_data(method_detail, value)
+                  process(method_detail, value)
                 end
 
               rescue => e
@@ -186,18 +186,21 @@ module DataShift
       # Method map represents a column from a file and it's correlated Product association.
       # Value string which may contain multiple values for a collection (has_many) association.
       #
-      def process()
+      def process(method_detail, value)  
 
-        current_method_detail = @populator.current_method_detail
-        current_value         = @populator.current_value
-
+        raise ProductLoadError.new("Cannot process #{value} NO details found to assign to") unless(method_detail)
+          
+        # TODO - start supporting assigning extra data via current_attribute_hash
+        current_value, current_attribute_hash = @populator.prepare_data(method_detail, value)
+         
+        current_method_detail = method_detail
+       
         logger.debug "Processing value: [#{current_value}]"
 
         # Special cases for Products, generally where a simple one stage lookup won't suffice
         # otherwise simply use default processing from base class
         if(current_value && (current_method_detail.operator?('variants') || current_method_detail.operator?('option_types')) )
-
-          add_options
+          add_options_variants
 
         elsif(current_method_detail.operator?('taxons') && current_value)
 
@@ -216,8 +219,6 @@ module DataShift
           if(@load_object.variants.size > 0)
 
             if(current_value.to_s.include?(Delimiters::multi_assoc_delim))
-
-              current_value.to_s.include?(Delimiters::multi_assoc_delim)
 
               # Check if we processed Option Types and assign  per option
               values = current_value.to_s.split(Delimiters::multi_assoc_delim)
@@ -257,6 +258,11 @@ module DataShift
 
         elsif(current_value && (current_method_detail.operator?('count_on_hand') || current_method_detail.operator?('on_hand')) )
 
+          # CURRENTLY BROKEN FOR Spree 2.2 - New Stock management : 
+          # http://guides.spreecommerce.com/developer/inventory.html
+          
+          logger.warn("NO STOCK SET - count_on_hand BROKEN - needs updating for new StockManagement in Spree >= 2.2")
+          # return
 
           # Unless we can save here, in danger of count_on_hand getting wiped out.
           # If we set (on_hand or count_on_hand) on an unsaved object, during next subsequent save
@@ -326,35 +332,38 @@ module DataShift
       #
       #     mime_type:jpeg;print_type:black_white|mime_type:jpeg|mime_type:png, PDF;print_type:colour
       #
-      def add_options
-
+      def add_options_variants
+      
         # TODO smart column ordering to ensure always valid by time we get to associations
         begin
           save_if_new
         rescue => e
-
-          raise DataShifSpree::ProductLoadError.new("Cannot add OptionTypes/Variants - No parent Product")
+          raise ProductLoadError.new("Cannot add OptionTypes/Variants - Save failed on parent Product")
         end
         # example : mime_type:jpeg;print_type:black_white|mime_type:jpeg|mime_type:png, PDF;print_type:colour
 
         variants = get_each_assoc
 
-        # example line becomes :
-        #   1) mime_type:jpeg;print_type:black_white
-        #   2) mime_type:jpeg
-        #   3) mime_type:png, PDF;print_type:colour
+        logger.info "add_options_variants #{variants.inspect}"
+        
+        # example line becomes :  
+        #   1) mime_type:jpeg|print_type:black_white  
+        #   2) mime_type:jpeg  
+        #   3) mime_type:png, PDF|print_type:colour
 
         variants.each do |per_variant|
 
-          option_types = per_variant.split(';')    # => [mime_type:jpeg, print_type:black_white]
+          option_types = per_variant.split(Delimiters::multi_facet_delim)    # => [mime_type:jpeg, print_type:black_white]
 
+          logger.info "add_options_variants #{option_types.inspect}"
+           
           optiontype_vlist_map = {}
 
           option_types.each do |ostr|
 
             oname, value_str = ostr.split(Delimiters::name_value_delim)
 
-            option_type = @@option_type_klass.find_by_name(oname)
+            option_type = @@option_type_klass.where(:name => oname).first
 
             unless option_type
               option_type = @@option_type_klass.create( :name => oname, :presentation => oname.humanize)
@@ -364,6 +373,7 @@ module DataShift
                 puts "WARNING: OptionType #{oname} NOT found and could not create - Not set Product"
                 next
               end
+              logger.info "Created missing OptionType #{option_type.inspect}"
               puts "Created missing OptionType #{option_type.inspect}"
             end
 
