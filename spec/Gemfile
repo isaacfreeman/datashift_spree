@@ -25,7 +25,7 @@ end
 
 platform :ruby do
   gem 'sqlite3'
-  gem "debugger"
+  #gem "debugger"
 end
 
 # FROM SANDBOX GEMFILE
@@ -58,6 +58,10 @@ end
 
 
 #DATASHIFT TESTING
+#
+# See https://github.com/sstephenson/execjs#readme for more supported runtimes
+gem 'therubyracer', platforms: :ruby
+
 
 gem 'spree', '2.2.2'
 
@@ -68,8 +72,6 @@ gem 'spree', '2.2.2'
 
 gem 'spree_gateway', :git => 'https://github.com/spree/spree_gateway.git', :branch => '2-2-stable'
 gem 'spree_auth_devise', :git => 'https://github.com/spree/spree_auth_devise.git', :branch => '2-2-stable'
-
-  
 
 
 # gem 'spree_auth_devise'
