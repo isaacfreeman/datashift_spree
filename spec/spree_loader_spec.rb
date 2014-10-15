@@ -65,7 +65,7 @@ describe 'SpreeLoader' do
 
   def test_basic_product( source )
     
-    @product_loader.perform_load( ifixture_file(source), :mandatory => ['sku', 'name', 'price'] )
+    @product_loader.perform_load( ifixture_file(source), :mandatory => ['sku', 'name', 'price', 'shipping_category'] )
 
     @Product_klass.count.should == 3
     
@@ -85,8 +85,9 @@ describe 'SpreeLoader' do
     p.name.should == "Simple Product for AR Loader"
     p.description.should == "blah blah"
     p.cost_price.should == 320.00
-    p.option_types.should have_exactly(1).items
-    p.option_types.should have_exactly(1).items
+    
+    expect(p.option_types.size).to eq 1
+    expect(p.option_types.size).to eq 1
     
     p.has_variants?.should be false
     
