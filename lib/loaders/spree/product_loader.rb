@@ -196,6 +196,8 @@ module DataShift
         current_method_detail = method_detail
        
         logger.debug "Processing value: [#{current_value}]"
+        puts "Processing #{current_method_detail.operator}: [#{current_value}]"
+
 
         # Special cases for Products, generally where a simple one stage lookup won't suffice
         # otherwise simply use default processing from base class
@@ -232,7 +234,7 @@ module DataShift
             end
 
           else
-            super
+            # super
           end
 
         elsif(current_method_detail.operator?('variant_sku') && current_value)
@@ -253,7 +255,7 @@ module DataShift
             end
 
           else
-            super
+            # super
           end
 
         elsif(current_value && (current_method_detail.operator?('count_on_hand') || current_method_detail.operator?('on_hand')) )
@@ -399,7 +401,7 @@ module DataShift
           # [ [mime, ['pdf', 'jpeg', 'gif']], [print_type, ['black_white']] ]
 
           lead_option_type, lead_ovalues = sorted_map.shift
-
+          
           # TODO .. benchmarking to find most efficient way to create these but ensure Product.variants list
           # populated .. currently need to call reload to ensure this (seems reqd for Spree 1/Rails 3, wasn't required b4
           lead_ovalues.each do |ovname|
@@ -423,10 +425,13 @@ module DataShift
                 ov_list << ov if(ov)
               end
             end
+            
+            binding.pry
 
             unless(ov_list.empty?)
 
               logger.info("Creating Variant from OptionValue(s) #{ov_list.collect(&:name).inspect}")
+              puts "Creating Variant from OptionValue(s) #{ov_list.collect(&:name).inspect}"
 
               i = @load_object.variants.size + 1
 
