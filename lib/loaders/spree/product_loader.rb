@@ -426,8 +426,6 @@ module DataShift
               end
             end
             
-            binding.pry
-
             unless(ov_list.empty?)
 
               logger.info("Creating Variant from OptionValue(s) #{ov_list.collect(&:name).inspect}")
