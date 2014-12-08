@@ -186,17 +186,17 @@ module DataShift
       # Method map represents a column from a file and it's correlated Product association.
       # Value string which may contain multiple values for a collection (has_many) association.
       #
-      def process(method_detail, value)  
+      def process(method_detail, value)
 
         raise ProductLoadError.new("Cannot process #{value} NO details found to assign to") unless(method_detail)
-          
+
         # TODO - start supporting assigning extra data via current_attribute_hash
         current_value, current_attribute_hash = @populator.prepare_data(method_detail, value)
-         
+
         current_method_detail = method_detail
-       
+
         logger.debug "Processing value: [#{current_value}]"
-        puts "Processing #{current_method_detail.operator}: [#{current_value}]"
+        puts "  Processing #{current_method_detail.operator}: [#{current_value}]"
 
 
         # Special cases for Products, generally where a simple one stage lookup won't suffice
@@ -260,9 +260,9 @@ module DataShift
 
         elsif(current_value && (current_method_detail.operator?('count_on_hand') || current_method_detail.operator?('on_hand')) )
 
-          # CURRENTLY BROKEN FOR Spree 2.2 - New Stock management : 
+          # CURRENTLY BROKEN FOR Spree 2.2 - New Stock management :
           # http://guides.spreecommerce.com/developer/inventory.html
-          
+
           logger.warn("NO STOCK SET - count_on_hand BROKEN - needs updating for new StockManagement in Spree >= 2.2")
           # return
 
@@ -335,7 +335,7 @@ module DataShift
       #     mime_type:jpeg;print_type:black_white|mime_type:jpeg|mime_type:png, PDF;print_type:colour
       #
       def add_options_variants
-      
+
         # TODO smart column ordering to ensure always valid by time we get to associations
         begin
           save_if_new
@@ -347,10 +347,10 @@ module DataShift
         variants = get_each_assoc
 
         logger.info "add_options_variants #{variants.inspect}"
-        
-        # example line becomes :  
-        #   1) mime_type:jpeg|print_type:black_white  
-        #   2) mime_type:jpeg  
+
+        # example line becomes :
+        #   1) mime_type:jpeg|print_type:black_white
+        #   2) mime_type:jpeg
         #   3) mime_type:png, PDF|print_type:colour
 
         variants.each do |per_variant|
@@ -358,7 +358,7 @@ module DataShift
           option_types = per_variant.split(Delimiters::multi_facet_delim)    # => [mime_type:jpeg, print_type:black_white]
 
           logger.info "add_options_variants #{option_types.inspect}"
-           
+
           optiontype_vlist_map = {}
 
           option_types.each do |ostr|
@@ -401,7 +401,7 @@ module DataShift
           # [ [mime, ['pdf', 'jpeg', 'gif']], [print_type, ['black_white']] ]
 
           lead_option_type, lead_ovalues = sorted_map.shift
-          
+
           # TODO .. benchmarking to find most efficient way to create these but ensure Product.variants list
           # populated .. currently need to call reload to ensure this (seems reqd for Spree 1/Rails 3, wasn't required b4
           lead_ovalues.each do |ovname|
@@ -425,7 +425,7 @@ module DataShift
                 ov_list << ov if(ov)
               end
             end
-            
+
             unless(ov_list.empty?)
 
               logger.info("Creating Variant from OptionValue(s) #{ov_list.collect(&:name).inspect}")
@@ -509,42 +509,20 @@ module DataShift
 
           # Each chain can contain either a single Taxon, or the tree like structure parent>child>child
           name_list = chain.split(/\s*>\s*/)
-
-          parent_name = name_list.shift
-
-          parent_taxonomy = @@taxonomy_klass.find_or_create_by_name(parent_name)
-
-          raise DataShift::DataProcessingError.new("Could not find or create Taxonomy #{parent_name}") unless parent_taxonomy
-
-          parent = parent_taxonomy.root
-
-          # Add the Taxons to Taxonomy from tree structure parent>child>child
-          taxons = name_list.collect do |name|
-
-            begin
-              taxon = @@taxon_klass.find_or_create_by_name_and_parent_id_and_taxonomy_id(name, parent && parent.id, parent_taxonomy.id)
-
-              unless(taxon)
-                puts "Not found or created so now what ?"
-              end
-            rescue => e
-              logger.error(e.inspect)
-              logger.error "Cannot assign Taxon ['#{taxon}'] to Product ['#{load_object.name}']"
-              next
-            end
-
-            parent = taxon  # current taxon becomes next parent
-            taxon
+          taxonomy_name = name_list.shift
+          taxonomy = @@taxonomy_klass.find_or_create_by_name(taxonomy_name)
+          raise DataShift::DataProcessingError.new("Could not find or create Taxonomy #{taxonomy_name}") unless taxonomy
+          taxon = taxonomy.root
+          name_list.each do |taxon_name|
+            taxon = @@taxon_klass.find_or_create_by_name_and_parent_id_and_taxonomy_id(taxon_name, taxon.id, taxonomy.id)
           end
 
-          taxons << parent_taxonomy.root
-
-          unique_list = taxons.compact.uniq - (@load_object.taxons || [])
-
-          logger.debug("Product assigned to Taxons : #{unique_list.collect(&:name).inspect}")
-
-          @load_object.taxons << unique_list unless(unique_list.empty?)
-          # puts @load_object.taxons.inspect
+          if taxon
+            @load_object.taxons << taxon # unique_list unless(unique_list.empty?)
+            puts "    Added to taxon #{taxon.pretty_name}"
+          else
+            puts "    Taxon not found or created: #{name}"
+          end
 
         end
 
